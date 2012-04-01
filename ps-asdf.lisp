@@ -38,23 +38,35 @@
      append (get-module-ps-files c (cons (asdf:component-name c) path))
      else when (typep c 'asdf::3b-ps-file)
      collect (list (reverse (cons (component-name c) path))
-                   (first (output-files (make-instance 'compile-op) c)))))
+                   (first (output-files (make-instance 'compile-op) c))
+                   c)))
 
-(defun make-system-dispatcher (system-designators &key (base-dir "/")
-                               default-version)
+(defun map-system-url-files (function system-designators
+                             &key (base-dir "/") default-version)
+  "for all ps files defined in specified system(s), call FUNCTION with
+url, source file name, and js file name"
   (let ((systems (mapcar 'asdf:find-system
-                         (alexandria:ensure-list system-designators)))
-        (url-map (make-hash-table :test 'equal)))
+                         (alexandria:ensure-list system-designators))))
     (loop for system in systems
        for version = (if (slot-boundp system 'version)
                          (asdf:component-version system)
                          default-version)
        for files = (get-module-ps-files system)
-       do (loop for (file js-file) in files
-             do (setf (gethash (format nil "~a~a/~@[~a/~]~{~a~^/~}.js"
+       do (loop for (file js-file comp) in files
+             do (funcall function (format nil "~a~a/~@[~a/~]~{~a~^/~}.js"
                                        base-dir (component-name system) version
-                                       file) url-map)
-                      js-file)))
+                                       file)
+                         (component-pathname comp)
+                         js-file)))))
+
+(defun make-system-dispatcher (system-designators &key (base-dir "/")
+                               default-version)
+  (let ((url-map (make-hash-table :test 'equal)))
+    (map-system-url-files (lambda (u s f)
+                            (declare (ignore s))
+                            (setf (gethash u url-map) f))
+                          system-designators :base-dir base-dir
+                          :default-version default-version)
     (format t "serving files ~s~%" (alexandria:hash-table-plist url-map))
   (lambda (request)
     (let ((f (gethash (hunchentoot:script-name request) url-map)))
